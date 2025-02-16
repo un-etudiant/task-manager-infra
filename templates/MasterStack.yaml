@@ -1,0 +1,181 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Master template for deploying the complete multi-tier application infrastructure'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+
+  TemplateBucket:
+    Description: S3 bucket containing the nested templates
+    Type: String
+    Default: taskprojstack
+
+  KeyPairName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair
+
+  SSHLocation:
+    Description: IP address range that can SSH to the EC2 instances
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x
+
+  DBName:
+    Description: Database name
+    Type: String
+    Default: task_manager_db
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters
+
+  DBUsername:
+    Description: Database admin username
+    Type: String
+    Default: task_admin
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters
+
+  DBPassword:
+    Description: Database admin password
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 41
+    ConstraintDescription: must contain only alphanumeric characters
+
+  WebInstanceType:
+    Description: EC2 instance type for web servers
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+
+  AppInstanceType:
+    Description: EC2 instance type for application servers
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+
+  DBInstanceType:
+    Description: Database instance class
+    Type: String
+    Default: db.t3.micro
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+
+Resources:
+  VPCStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub 'https://${TemplateBucket}.s3.ap-south-1.amazonaws.com/vpc-template.yaml'
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      TimeoutInMinutes: 20
+
+  SecurityGroupsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: VPCStack
+    Properties:
+      TemplateURL: !Sub 'https://${TemplateBucket}.s3.ap-south-1.amazonaws.com/security-groups.yaml'
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VPCID: !GetAtt VPCStack.Outputs.VPCID
+        SSHLocation: !Ref SSHLocation
+      TimeoutInMinutes: 10
+
+  WebLayerStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: SecurityGroupsStack
+    Properties:
+      TemplateURL: !Sub 'https://${TemplateBucket}.s3.ap-south-1.amazonaws.com/web-layer.yaml'
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        KeyPairName: !Ref KeyPairName
+        InstanceType: !Ref WebInstanceType
+        VPCID: !GetAtt VPCStack.Outputs.VPCID
+        WebServerSecurityGroup: !GetAtt SecurityGroupsStack.Outputs.WebServerSecurityGroupID
+        WebALBSecurityGroup: !GetAtt SecurityGroupsStack.Outputs.WebALBSecurityGroupID
+        PublicSubnet1: !GetAtt VPCStack.Outputs.PublicSubnet1
+        PublicSubnet2: !GetAtt VPCStack.Outputs.PublicSubnet2
+        WebSubnet1: !GetAtt VPCStack.Outputs.WebSubnet1
+        WebSubnet2: !GetAtt VPCStack.Outputs.WebSubnet2
+      TimeoutInMinutes: 15
+
+  AppLayerStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: WebLayerStack
+    Properties:
+      TemplateURL: !Sub 'https://${TemplateBucket}.s3.ap-south-1.amazonaws.com/app-layer.yaml'
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        KeyPairName: !Ref KeyPairName
+        InstanceType: !Ref AppInstanceType
+        VPCID: !GetAtt VPCStack.Outputs.VPCID
+        AppServerSecurityGroup: !GetAtt SecurityGroupsStack.Outputs.AppServerSecurityGroupID
+        InternalALBSecurityGroup: !GetAtt SecurityGroupsStack.Outputs.InternalALBSecurityGroupID
+        AppSubnet1: !GetAtt VPCStack.Outputs.AppSubnet1
+        AppSubnet2: !GetAtt VPCStack.Outputs.AppSubnet2
+      TimeoutInMinutes: 15
+
+  DatabaseStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: AppLayerStack
+    Properties:
+      TemplateURL: !Sub 'https://${TemplateBucket}.s3.ap-south-1.amazonaws.com/database-layer.yaml'
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VPCID: !GetAtt VPCStack.Outputs.VPCID
+        DBSecurityGroup: !GetAtt SecurityGroupsStack.Outputs.DBSecurityGroupID
+        DBSubnet1: !GetAtt VPCStack.Outputs.DBSubnet1
+        DBName: !Ref DBName
+        DBUsername: !Ref DBUsername
+        DBPassword: !Ref DBPassword
+        DBInstanceClass: !Ref DBInstanceType
+      TimeoutInMinutes: 30
+
+Outputs:
+  VPCID:
+    Description: VPC ID
+    Value: !GetAtt VPCStack.Outputs.VPCID
+
+  WebALBDNSName:
+    Description: Public ALB DNS Name
+    Value: !GetAtt WebLayerStack.Outputs.WebALBDNSName
+
+  InternalALBDNSName:
+    Description: Internal ALB DNS Name
+    Value: !GetAtt AppLayerStack.Outputs.InternalALBDNSName
+
+  WebASGName:
+    Description: Web Auto Scaling Group Name
+    Value: !GetAtt WebLayerStack.Outputs.WebASGName
+
+  AppASGName:
+    Description: App Auto Scaling Group Name
+    Value: !GetAtt AppLayerStack.Outputs.AppASGName
+
+  DatabaseEndpoint:
+    Description: RDS Database Endpoint
+    Value: !GetAtt DatabaseStack.Outputs.RDSEndpoint
+
+  DatabasePort:
+    Description: RDS Database Port
+    Value: !GetAtt DatabaseStack.Outputs.RDSPort

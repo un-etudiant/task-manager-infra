@@ -1,0 +1,11 @@
+aws cloudformation create-stack \
+  --stack-name task-mgr-stack \
+  --template-url https://taskprojstack.s3.ap-south-1.amazonaws.com/MasterStack.yaml \
+  --parameters \
+    ParameterKey=EnvironmentName,ParameterValue=prod \
+    ParameterKey=TemplateBucket,ParameterValue=taskprojstack \
+    ParameterKey=KeyPairName,ParameterValue=taskkeypair \
+    ParameterKey=SSHLocation,ParameterValue=49.204.107.72/32 \
+    ParameterKey=DBPassword,ParameterValue=4rfvVFR$5tgbBGT% \
+  --capabilities CAPABILITY_IAM \
+  --region ap-south-1

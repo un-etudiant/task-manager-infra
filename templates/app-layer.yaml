@@ -1,0 +1,184 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'App Layer with Internal ALB and ASG'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name
+    Type: String
+    Default: dev
+  
+  KeyPairName:
+    Description: Name of an existing EC2 KeyPair
+    Type: AWS::EC2::KeyPair::KeyName
+  
+  InternalALBSecurityGroup:
+    Description: Security Group ID for Internal ALB
+    Type: AWS::EC2::SecurityGroup::Id
+  
+  AppServerSecurityGroup:
+    Description: Security Group ID for App Servers
+    Type: AWS::EC2::SecurityGroup::Id
+  
+  AppSubnet1:
+    Description: First app tier subnet ID
+    Type: AWS::EC2::Subnet::Id
+  
+  AppSubnet2:
+    Description: Second app tier subnet ID
+    Type: AWS::EC2::Subnet::Id
+  
+  VPCID:
+    Description: VPC ID
+    Type: AWS::EC2::VPC::Id
+
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t3.micro
+
+Resources:
+  InternalALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-internal-alb
+      Scheme: internal
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+      SecurityGroups:
+        - !Ref InternalALBSecurityGroup
+      Subnets:
+        - !Ref AppSubnet1
+        - !Ref AppSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-internal-alb
+
+  AppALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-app-tg
+      Port: 8080
+      Protocol: HTTP
+      VpcId: !Ref VPCID
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /actuator/health
+      HealthCheckPort: '8080'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      TargetType: instance
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-app-tg
+
+  InternalALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AppALBTargetGroup
+      LoadBalancerArn: !Ref InternalALB
+      Port: 8080
+      Protocol: HTTP
+
+  AppServerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub ${EnvironmentName}-app-lt
+      LaunchTemplateData:
+        ImageId: ami-0ddfba243cbee3768 # Amazon Linux 2023
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyPairName
+        SecurityGroupIds:
+          - !Ref AppServerSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y java-17-amazon-corretto
+            
+            # Create application directory
+            mkdir -p /opt/app
+            
+            # Create a placeholder health check endpoint
+            mkdir -p /opt/app/actuator
+            echo "OK" > /opt/app/actuator/health
+            
+            # Install and configure nginx for the health check
+            yum install -y nginx
+            cat > /etc/nginx/conf.d/app.conf << 'EOF'
+            server {
+                listen 8080;
+                location /actuator/health {
+                    root /opt/app;
+                    try_files $uri =404;
+                }
+            }
+            EOF
+            
+            systemctl start nginx
+            systemctl enable nginx
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub ${EnvironmentName}-app-server
+
+  AppServerASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub ${EnvironmentName}-app-asg
+      VPCZoneIdentifier:
+        - !Ref AppSubnet1
+        - !Ref AppSubnet2
+      TargetGroupARNs:
+        - !Ref AppALBTargetGroup
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      LaunchTemplate:
+        LaunchTemplateId: !Ref AppServerLaunchTemplate
+        Version: !GetAtt AppServerLaunchTemplate.LatestVersionNumber
+      MinSize: 2
+      MaxSize: 4
+      DesiredCapacity: 2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-app-server
+          PropagateAtLaunch: true
+
+  AppServerScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AppServerASG
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 70.0
+
+Outputs:
+  InternalALBDNSName:
+    Description: DNS Name of the Internal Application Load Balancer
+    Value: !GetAtt InternalALB.DNSName
+    Export:
+      Name: !Sub ${EnvironmentName}-InternalALB-DNS
+
+  InternalALBArn:
+    Description: ARN of the Internal Application Load Balancer
+    Value: !Ref InternalALB
+    Export:
+      Name: !Sub ${EnvironmentName}-InternalALB-ARN
+
+  AppTargetGroupArn:
+    Description: ARN of the App Target Group
+    Value: !Ref AppALBTargetGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-AppTG-ARN
+
+  AppASGName:
+    Description: Name of the App Auto Scaling Group
+    Value: !Ref AppServerASG
+    Export:
+      Name: !Sub ${EnvironmentName}-AppASG-Name

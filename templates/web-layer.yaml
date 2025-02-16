@@ -1,0 +1,173 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Web Layer with ALB and ASG'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name
+    Type: String
+    Default: dev
+  
+  KeyPairName:
+    Description: Name of an existing EC2 KeyPair
+    Type: AWS::EC2::KeyPair::KeyName
+  
+  WebALBSecurityGroup:
+    Description: Security Group ID for Web ALB
+    Type: AWS::EC2::SecurityGroup::Id
+  
+  WebServerSecurityGroup:
+    Description: Security Group ID for Web Servers
+    Type: AWS::EC2::SecurityGroup::Id
+  
+  PublicSubnet1:
+    Description: First public subnet ID
+    Type: AWS::EC2::Subnet::Id
+  
+  PublicSubnet2:
+    Description: Second public subnet ID
+    Type: AWS::EC2::Subnet::Id
+  
+  WebSubnet1:
+    Description: First web tier subnet ID
+    Type: AWS::EC2::Subnet::Id
+  
+  WebSubnet2:
+    Description: Second web tier subnet ID
+    Type: AWS::EC2::Subnet::Id
+  
+  VPCID:
+    Description: VPC ID
+    Type: AWS::EC2::VPC::Id
+
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t3.micro
+
+Resources:
+  WebALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-web-alb
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+      SecurityGroups:
+        - !Ref WebALBSecurityGroup
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-web-alb
+
+  WebALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-web-tg
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VPCID
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      TargetType: instance
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-web-tg
+
+  WebALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebALBTargetGroup
+      LoadBalancerArn: !Ref WebALB
+      Port: 80
+      Protocol: HTTP
+
+  WebServerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub ${EnvironmentName}-web-lt
+      LaunchTemplateData:
+        ImageId: ami-0ddfba243cbee3768  # Amazon Linux 2023
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyPairName
+        SecurityGroupIds:
+          - !Ref WebServerSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y httpd
+            systemctl start httpd
+            systemctl enable httpd
+            echo "<html><body><h1>Web Server</h1></body></html>" > /var/www/html/index.html
+            echo "OK" > /var/www/html/health
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub ${EnvironmentName}-web-server
+
+  WebServerASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub ${EnvironmentName}-web-asg
+      VPCZoneIdentifier:
+        - !Ref WebSubnet1
+        - !Ref WebSubnet2
+      TargetGroupARNs:
+        - !Ref WebALBTargetGroup
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebServerLaunchTemplate
+        Version: !GetAtt WebServerLaunchTemplate.LatestVersionNumber
+      MinSize: 2
+      MaxSize: 4
+      DesiredCapacity: 2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-web-server
+          PropagateAtLaunch: true
+
+  WebServerScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref WebServerASG
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 70.0
+
+Outputs:
+  WebALBDNSName:
+    Description: DNS Name of the Web Application Load Balancer
+    Value: !GetAtt WebALB.DNSName
+    Export:
+      Name: !Sub ${EnvironmentName}-WebALB-DNS
+
+  WebALBArn:
+    Description: ARN of the Web Application Load Balancer
+    Value: !Ref WebALB
+    Export:
+      Name: !Sub ${EnvironmentName}-WebALB-ARN
+
+  WebTargetGroupArn:
+    Description: ARN of the Web Target Group
+    Value: !Ref WebALBTargetGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-WebTG-ARN
+
+  WebASGName:
+    Description: Name of the Web Auto Scaling Group
+    Value: !Ref WebServerASG
+    Export:
+      Name: !Sub ${EnvironmentName}-WebASG-Name

@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Simple Single-AZ PostgreSQL RDS'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name
+    Type: String
+    Default: dev
+  
+  VPCID:
+    Description: VPC ID
+    Type: AWS::EC2::VPC::Id
+  
+  DBSecurityGroup:
+    Description: Security Group ID for RDS
+    Type: AWS::EC2::SecurityGroup::Id
+  
+  DBSubnet1:
+    Description: First database subnet ID
+    Type: AWS::EC2::Subnet::Id
+  
+  
+  DBName:
+    Description: Database name
+    Type: String
+    Default: taskdb
+  
+  DBUsername:
+    Description: Database admin username
+    Type: String
+    Default: postgres
+  
+  DBPassword:
+    Description: Database admin password
+    Type: String
+    NoEcho: true
+  
+  DBInstanceClass:
+    Description: Database instance class
+    Type: String
+    Default: db.t3.micro
+
+Resources:
+  # DB Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Database subnet group
+      SubnetIds:
+        - !Ref DBSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-subnet-group
+
+  # RDS Instance
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref DBName
+      Engine: postgres
+      EngineVersion: 15.5
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-postgresql
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: 20
+      StorageType: gp3
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      MultiAZ: false
+      PubliclyAccessible: false
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      Port: 5432
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-postgresql
+
+Outputs:
+  RDSEndpoint:
+    Description: RDS Instance Endpoint
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${EnvironmentName}-RDS-Endpoint
+
+  RDSPort:
+    Description: RDS Instance Port
+    Value: !GetAtt DBInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${EnvironmentName}-RDS-Port
+
+  DBName:
+    Description: Database Name
+    Value: !Ref DBName
+    Export:
+      Name: !Sub ${EnvironmentName}-DB-Name
