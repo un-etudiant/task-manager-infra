@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'VPC with public and private subnets across two AZs'
+Description: 'VPC with properly segregated subnets and route tables'
 
 Parameters:
   EnvironmentName:
@@ -13,6 +13,7 @@ Parameters:
     Default: 10.0.0.0/16
 
 Resources:
+  # VPC and Internet Gateway
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -36,6 +37,7 @@ Resources:
       InternetGatewayId: !Ref InternetGateway
       VpcId: !Ref VPC
 
+  # Public Subnets (for ALB)
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -58,6 +60,7 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName}-public-subnet-2
 
+  # Web Tier Subnets
   WebSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -80,6 +83,7 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName}-web-subnet-2
 
+  # App Tier Subnets
   AppSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -102,6 +106,7 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName}-app-subnet-2
 
+  # DB Tier Subnets
   DBSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -113,7 +118,18 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName}-db-subnet-1
 
-  
+  DBSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.32.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-subnet-2
+
+  # NAT Gateways
   NatGateway1EIP:
     Type: AWS::EC2::EIP
     DependsOn: InternetGatewayAttachment
@@ -144,6 +160,7 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName}-natgw-2
 
+  # Route Tables
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -152,7 +169,56 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName}-public-rt
 
-  DefaultPublicRoute:
+  WebRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-web-rt-1
+
+  WebRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-web-rt-2
+
+  AppRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-app-rt-1
+
+  AppRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-app-rt-2
+
+  DBRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-rt-1
+
+  DBRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-rt-2
+
+  # Routes
+  PublicRoute:
     Type: AWS::EC2::Route
     DependsOn: InternetGatewayAttachment
     Properties:
@@ -160,6 +226,35 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
+  WebRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref WebRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  WebRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref WebRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+
+  AppRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AppRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  AppRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AppRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+
+  # Route Table Associations
   PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -172,66 +267,41 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
       SubnetId: !Ref PublicSubnet2
 
-  PrivateRouteTable1:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-private-rt-1
-
-  DefaultPrivateRoute1:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable1
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway1
-
-  PrivateRouteTable2:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-private-rt-2
-
-  DefaultPrivateRoute2:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable2
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway2
-
   WebSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      RouteTableId: !Ref PrivateRouteTable1
+      RouteTableId: !Ref WebRouteTable1
       SubnetId: !Ref WebSubnet1
 
   WebSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      RouteTableId: !Ref PrivateRouteTable2
+      RouteTableId: !Ref WebRouteTable2
       SubnetId: !Ref WebSubnet2
 
   AppSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      RouteTableId: !Ref PrivateRouteTable1
+      RouteTableId: !Ref AppRouteTable1
       SubnetId: !Ref AppSubnet1
 
   AppSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      RouteTableId: !Ref PrivateRouteTable2
+      RouteTableId: !Ref AppRouteTable2
       SubnetId: !Ref AppSubnet2
 
   DBSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      RouteTableId: !Ref PrivateRouteTable1
+      RouteTableId: !Ref DBRouteTable1
       SubnetId: !Ref DBSubnet1
 
+  DBSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref DBRouteTable2
+      SubnetId: !Ref DBSubnet2
 
 Outputs:
   VPCID:
@@ -281,3 +351,9 @@ Outputs:
     Value: !Ref DBSubnet1
     Export:
       Name: !Sub ${EnvironmentName}-DBSubnet1
+
+  DBSubnet2:
+    Description: DB Subnet 2
+    Value: !Ref DBSubnet2
+    Export:
+      Name: !Sub ${EnvironmentName}-DBSubnet2

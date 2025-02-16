@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Simple Single-AZ PostgreSQL RDS'
+Description: 'Single-AZ PostgreSQL RDS with two subnet group requirement'
 
 Parameters:
   EnvironmentName:
@@ -19,6 +19,9 @@ Parameters:
     Description: First database subnet ID
     Type: AWS::EC2::Subnet::Id
   
+  DBSubnet2:
+    Description: Second database subnet ID
+    Type: AWS::EC2::Subnet::Id
   
   DBName:
     Description: Database name
@@ -34,25 +37,21 @@ Parameters:
     Description: Database admin password
     Type: String
     NoEcho: true
-  
-  DBInstanceClass:
-    Description: Database instance class
-    Type: String
-    Default: db.t3.micro
 
 Resources:
-  # DB Subnet Group
+  # DB Subnet Group (requires two subnets)
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
-      DBSubnetGroupDescription: Database subnet group
+      DBSubnetGroupDescription: Subnet group for RDS database
       SubnetIds:
         - !Ref DBSubnet1
+        - !Ref DBSubnet2
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-db-subnet-group
 
-  # RDS Instance
+  # RDS Instance (Single AZ)
   DBInstance:
     Type: AWS::RDS::DBInstance
     Properties:
@@ -60,7 +59,7 @@ Resources:
       Engine: postgres
       EngineVersion: 15.5
       DBInstanceIdentifier: !Sub ${EnvironmentName}-postgresql
-      DBInstanceClass: !Ref DBInstanceClass
+      DBInstanceClass: db.t3.micro
       AllocatedStorage: 20
       StorageType: gp3
       MasterUsername: !Ref DBUsername

@@ -5,7 +5,7 @@ Parameters:
   EnvironmentName:
     Description: Environment name
     Type: String
-    Default: prod
+    Default: dev
     AllowedValues:
       - dev
       - staging
@@ -14,7 +14,6 @@ Parameters:
   TemplateBucket:
     Description: S3 bucket containing the nested templates
     Type: String
-    Default: taskprojstack
 
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
@@ -26,33 +25,6 @@ Parameters:
     Type: String
     Default: 0.0.0.0/0
     AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
-    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x
-
-  DBName:
-    Description: Database name
-    Type: String
-    Default: task_manager_db
-    MinLength: 1
-    MaxLength: 64
-    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
-    ConstraintDescription: must begin with a letter and contain only alphanumeric characters
-
-  DBUsername:
-    Description: Database admin username
-    Type: String
-    Default: task_admin
-    MinLength: 1
-    MaxLength: 16
-    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
-    ConstraintDescription: must begin with a letter and contain only alphanumeric characters
-
-  DBPassword:
-    Description: Database admin password
-    Type: String
-    NoEcho: true
-    MinLength: 8
-    MaxLength: 41
-    ConstraintDescription: must contain only alphanumeric characters
 
   WebInstanceType:
     Description: EC2 instance type for web servers
@@ -72,14 +44,28 @@ Parameters:
       - t3.small
       - t3.medium
 
-  DBInstanceType:
-    Description: Database instance class
+  DBName:
+    Description: Database name
     Type: String
-    Default: db.t3.micro
-    AllowedValues:
-      - db.t3.micro
-      - db.t3.small
-      - db.t3.medium
+    Default: taskdb
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+
+  DBUsername:
+    Description: Database admin username
+    Type: String
+    Default: postgres
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+
+  DBPassword:
+    Description: Database admin password
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 41
 
 Resources:
   VPCStack:
@@ -145,24 +131,28 @@ Resources:
         VPCID: !GetAtt VPCStack.Outputs.VPCID
         DBSecurityGroup: !GetAtt SecurityGroupsStack.Outputs.DBSecurityGroupID
         DBSubnet1: !GetAtt VPCStack.Outputs.DBSubnet1
+        DBSubnet2: !GetAtt VPCStack.Outputs.DBSubnet2
         DBName: !Ref DBName
         DBUsername: !Ref DBUsername
         DBPassword: !Ref DBPassword
-        DBInstanceClass: !Ref DBInstanceType
       TimeoutInMinutes: 30
 
 Outputs:
-  VPCID:
-    Description: VPC ID
-    Value: !GetAtt VPCStack.Outputs.VPCID
+  WebsiteURL:
+    Description: URL for the web application
+    Value: !Sub http://${WebLayerStack.Outputs.WebALBDNSName}
 
-  WebALBDNSName:
-    Description: Public ALB DNS Name
-    Value: !GetAtt WebLayerStack.Outputs.WebALBDNSName
-
-  InternalALBDNSName:
+  InternalALBDNS:
     Description: Internal ALB DNS Name
     Value: !GetAtt AppLayerStack.Outputs.InternalALBDNSName
+
+  DatabaseEndpoint:
+    Description: RDS Database Endpoint
+    Value: !GetAtt DatabaseStack.Outputs.RDSEndpoint
+
+  DatabaseName:
+    Description: Database Name
+    Value: !Ref DBName
 
   WebASGName:
     Description: Web Auto Scaling Group Name
@@ -171,11 +161,3 @@ Outputs:
   AppASGName:
     Description: App Auto Scaling Group Name
     Value: !GetAtt AppLayerStack.Outputs.AppASGName
-
-  DatabaseEndpoint:
-    Description: RDS Database Endpoint
-    Value: !GetAtt DatabaseStack.Outputs.RDSEndpoint
-
-  DatabasePort:
-    Description: RDS Database Port
-    Value: !GetAtt DatabaseStack.Outputs.RDSPort
