@@ -57,11 +57,11 @@ Resources:
     Properties:
       DBName: !Ref DBName
       Engine: postgres
-      EngineVersion: 15.5
+      EngineVersion: 15.7
       DBInstanceIdentifier: !Sub ${EnvironmentName}-postgresql
       DBInstanceClass: db.t3.micro
       AllocatedStorage: 20
-      StorageType: gp3
+      StorageType: gp2
       MasterUsername: !Ref DBUsername
       MasterUserPassword: !Ref DBPassword
       MultiAZ: false

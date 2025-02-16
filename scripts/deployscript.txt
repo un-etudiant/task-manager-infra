@@ -6,6 +6,6 @@ aws cloudformation create-stack \
     ParameterKey=TemplateBucket,ParameterValue=taskprojstack \
     ParameterKey=KeyPairName,ParameterValue=taskkeypair \
     ParameterKey=SSHLocation,ParameterValue=49.204.107.72/32 \
-    ParameterKey=DBPassword,ParameterValue=XXXXXX \
+    ParameterKey=DBPassword,ParameterValue=4rfvVFR$5tgbBGT% \
   --capabilities CAPABILITY_IAM \
   --region ap-south-1
